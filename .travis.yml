@@ -24,5 +24,6 @@ install:
   - pip install 'python-language-server[all]'
     
 script:
+  - curl -LO http://git.savannah.gnu.org/cgit/emacs.git/plain/lisp/jsonrpc.el
   - make check
 
