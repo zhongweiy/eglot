@@ -335,7 +335,7 @@ SERVER.  ."
 Return (MANAGED-MODE PROJECT CLASS CONTACT).  If INTERACTIVE is
 non-nil, maybe prompt user, else error as soon as something can't
 be guessed."
-  (let* ((guessed-mode (if buffer-file-name major-mode))
+  (let* ((guessed-mode (if (eglot-trim-remote buffer-file-name) major-mode))
          (managed-mode
           (cond
            ((and interactive
@@ -349,7 +349,7 @@ be guessed."
            ((not guessed-mode)
             (eglot--error "Can't guess mode to manage for `%s'" (current-buffer)))
            (t guessed-mode)))
-         (project (or (project-current) `(transient . ,default-directory)))
+         (project (eglot-trim-remote-project (or (project-current) `(transient . ,default-directory))))
          (guess (cdr (assoc managed-mode eglot-server-programs
                             (lambda (m1 m2)
                               (or (eq m1 m2)
@@ -431,7 +431,7 @@ INTERACTIVE is t if called interactively."
              (y-or-n-p "[eglot] Live process found, reconnect instead? "))
         (eglot-reconnect current-server interactive)
       (when live-p (ignore-errors (eglot-shutdown current-server)))
-      (eglot--connect managed-major-mode project class contact))))
+      (eglot--connect managed-major-mode (eglot-trim-remote-project project) class contact))))
 
 (defun eglot-reconnect (server &optional interactive)
   "Reconnect to SERVER.
@@ -481,6 +481,26 @@ INTERACTIVE is t if called interactively."
   '(eglot-signal-didChangeConfiguration)
   "Hook run after server is successfully initialized.
 Each function is passed the server as an argument")
+
+(defun eglot-trim-remote (v)
+  "convert /ssh:remote_server:/home/test/filename.cpp to /home/test/filename.cpp"
+  (car (last (split-string v ":"))))
+
+(defun eglot-add-remote (remote v)
+  "convert /home/test/filename.cpp to /ssh:remote_server:/home/test/filename.cpp"
+  (concat remote v))
+
+(defun eglot-get-remote-server-prefix ()
+  "get file prefix like /ssh:remote_server:"
+  (let* (
+	 (v (split-string buffer-file-name ":"))
+	 (protocol (nth 0 v))
+	 (server (nth 1 v)))
+    (concat protocol ":" server ":")))
+
+(defun eglot-trim-remote-project (v)
+  "convert (vc . /ssh:remote_server:/home/test/filename.cpp) to (vc ./home/test/filename.cpp)"
+  (cons (car v) (eglot-trim-remote (cdr v))))
 
 (defun eglot--connect (managed-major-mode project class contact)
   "Connect to MANAGED-MAJOR-MODE, PROJECT, CLASS and CONTACT.
@@ -852,7 +872,7 @@ Reset in `eglot--managed-mode-onoff'.")
   "Find the current logical EGLOT server."
   (or
    eglot--cached-current-server
-   (let* ((probe (or (project-current)
+   (let* ((probe (or (eglot-trim-remote-project (project-current))
                      `(transient . ,default-directory))))
      (cl-find major-mode (gethash probe eglot--servers-by-project)
               :key #'eglot--major-mode))))
@@ -1094,7 +1114,7 @@ THINGS are either registrations or unregisterations."
 
 (defun eglot--TextDocumentIdentifier ()
   "Compute TextDocumentIdentifier object for current buffer."
-  `(:uri ,(eglot--path-to-uri buffer-file-name)))
+  `(:uri ,(eglot--path-to-uri (eglot-trim-remote buffer-file-name))))
 
 (defvar-local eglot--versioned-identifier 0)
 
@@ -1272,7 +1292,7 @@ DUMMY is ignored."
   "Like `xref-make' but with LSP's NAME, URI and POSITION."
   (cl-destructuring-bind (&key line character) position
     (xref-make name (xref-make-file-location
-                     (eglot--uri-to-path uri)
+                     (eglot-add-remote (eglot-get-remote-server-prefix) (eglot--uri-to-path uri))
                      ;; F!@(#*&#$)CKING OFF-BY-ONE again
                      (1+ line) character))))
 
